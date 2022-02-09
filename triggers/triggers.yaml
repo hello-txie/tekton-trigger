@@ -1,0 +1,92 @@
+---
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: pipelinerun-template
+  annotations:
+    description: "A template that holds a pipelinerun to be processed with parameters"
+objects:
+- apiVersion: triggers.tekton.dev/v1alpha1
+  kind: TriggerTemplate
+  metadata:
+    name: pipeline-template
+    namespace: ${NAMESPACE}
+  spec:
+    params:
+      - name: git-revision
+        description: The Git revision/branch to build
+      - name: git-url
+        description: The Git URL to pull source from
+    resourcetemplates:
+      - apiVersion: tekton.dev/v1beta1
+        kind: PipelineRun
+        metadata:
+          generateName: pipeline-run-
+          namespace: ${NAMESPACE}
+        spec:
+          serviceAccountName: ${SERVICE_ACCOUNT_NAME}
+          pipelineRef:
+            name: orchestrate-namespace
+          resources:
+            - name: source-repo
+              resourceSpec:
+                type: git
+                params:
+                - name: revision
+                  value: $(tt.params.git-revision)
+                - name: url
+                  value: $(tt.params.git-url)
+          params:
+            - name: git-revision
+              value: $(tt.params.git-revision)
+            - name: git-url
+              value: $(tt.params.git-url)
+- apiVersion: triggers.tekton.dev/v1alpha1
+  kind: TriggerBinding
+  metadata:
+    name: pipeline-binding
+    namespace: ${NAMESPACE}
+  spec:
+    params:
+      - name: git-revision
+        value: $(body.pull_request.head.ref)
+      - name: git-url
+        value: "git@github.com:$(body.repository.full_name).git"
+- apiVersion: triggers.tekton.dev/v1alpha1
+  kind: EventListener
+  metadata:
+    name: ${EVENT_LISTENER_NAME}
+    namespace: ${NAMESPACE}
+  spec:
+    serviceAccountName: ${SERVICE_ACCOUNT_NAME}
+    triggers:
+      - name: trigger
+        interceptors:
+          - github:
+              eventTypes: ["pull_request"]
+        bindings:
+        - ref: pipeline-binding
+        template:
+          ref: pipeline-template
+- apiVersion: route.openshift.io/v1
+  kind: Route
+  metadata:
+    labels:
+      eventlistener: el-${EVENT_LISTENER_NAME}
+    name: el-${EVENT_LISTENER_NAME}
+  spec:
+    port:
+      targetPort: http-listener
+    to:
+      kind: Service
+      name: el-${EVENT_LISTENER_NAME}
+parameters:
+- name: SERVICE_ACCOUNT_NAME
+  description: "The service account manager triggers"
+  value: tekton-trigger
+- name: NAMESPACE
+  description: "The namespace to host the triggers"
+  value: tekton-controller
+- name: EVENT_LISTENER_NAME
+  description: "Reference name for the event listener"
+  value: mr-event-listener

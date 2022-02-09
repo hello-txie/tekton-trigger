@@ -1,0 +1,75 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: initiate-namespace
+spec:
+  params:
+    - name: git-revision
+      description: The Git revision/branch to build
+      type: string
+    - name: git-url
+      description: The Git URL to pull source from
+      type: string
+    - name: ocp-cli-image
+      description: An image that contains oc cli tool 
+      type: string
+      default: quay.io/openshift/origin-cli
+    - name: ocp-cli-version
+      description: version for the OC cli image
+      type: string
+      default: "4.9"
+  resources:
+    inputs:
+      - name: source-repo
+        type: git
+  steps:
+    - name: apply-tekton-resource 
+      workingDir: /workspace/source-repo
+      image: $(params.ocp-cli-image):$(params.ocp-cli-version)
+      script: |
+        #!/usr/bin/env bash
+
+        oc new-project $(params.git-revision)
+
+        if [[ $? -eq 1 ]]
+        then
+          echo "--- Attempt to remove old namespace ---"
+          oc delete project $(params.git-revision) --ignore-not-found=true
+
+          oc get project $(params.git-revision) &> /dev/null
+          RET=$?
+          until [ ${RET} -eq 1 ]; do
+              echo "Waiting for $(params.git-revision) to be fully terminated..."
+              sleep 5
+              oc get project $(params.git-revision) &> /dev/null
+              RET=$?
+          done
+
+          echo "--- Attempt to create new namespace ---"
+          oc new-project $(params.git-revision) &> /dev/null
+        fi
+
+        # echo "--- Attempt to remove old namespace ---"
+        # oc delete project $(params.git-revision) --ignore-not-found=true
+
+        # oc get project $(params.git-revision) &> /dev/null
+        # RET=$?
+        # until [ ${RET} -eq 1 ]; do
+        #     echo "Waiting for $(params.git-revision) to be fully terminated..."
+        #     sleep 5
+        #     oc get project $(params.git-revision) &> /dev/null
+        #     RET=$?
+        # done
+
+        # echo "--- Attempt to create new namespace ---"
+        # oc new-project $(params.git-revision) &> /dev/null
+
+        echo "--- In OCP Namespace: $(params.git-revision) ---"
+        oc project $(params.git-revision) &> /dev/null
+
+        echo "--- Apply Tekton resources to $(params.git-revision) ---"
+        oc apply -k .gitops/pipeline -n $(params.git-revision)
+
+        echo "--- Process Pipelinerun template and initiate Pipelinerun in $(params.git-revision) ---"
+        oc process -f .gitops/build/pipeline-template.yaml -p GITREVISION=$(params.git-revision) -p GITURL=$(params.git-url) | oc create -f - -n $(params.git-revision)

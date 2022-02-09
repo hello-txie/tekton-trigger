@@ -1,0 +1,28 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: orchestrate-namespace
+spec:
+  resources:
+    - name: source-repo
+      type: git
+  params:
+    - name: git-revision
+      description: The Git revision/branch to build
+      type: string
+    - name: git-url
+      description: The Git URL to pull source from
+      type: string
+  tasks:
+    - name: initiate-namespace
+      taskRef: 
+        name: initiate-namespace
+      params:
+        - name: git-revision
+          value: "$(params.git-revision)"
+        - name: git-url
+          value: "$(params.git-url)"        
+      resources:
+        inputs:
+          - name: source-repo
+            resource: source-repo
